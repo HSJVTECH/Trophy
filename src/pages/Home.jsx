@@ -6,44 +6,126 @@ import { useCart } from '../context/CartContext';
 import { products, categories, testimonials, statsData } from '../data/products';
 import './Home.css';
 
-/* ── Frame-by-frame trophy animation ── */
+/* ── Fullscreen hardware-accelerated trophy background player ── */
 const TOTAL_FRAMES = 300;
-const ANIM_FPS = 30;
 
-const TrophyFramePlayer = () => {
-  const [frame, setFrame] = useState(1);
-  const [loaded, setLoaded] = useState(false);
-  const rafRef = useRef(null);
+const TrophyFullscreenBackground = () => {
+  const canvasRef = useRef(null);
+  const imagesRef = useRef([]);
+  const currentFrameRef = useRef(0);
   const lastTimeRef = useRef(null);
-  const containerRef = useRef(null);
 
+  // Preload frame images into memory array with pre-decoding
   useEffect(() => {
-    const interval = 1000 / ANIM_FPS;
-    const animate = (time) => {
-      if (!lastTimeRef.current) lastTimeRef.current = time;
-      const elapsed = time - lastTimeRef.current;
-      if (elapsed >= interval) {
-        setFrame(f => f >= TOTAL_FRAMES ? 1 : f + 1);
-        lastTimeRef.current = time;
+    let mounted = true;
+    const images = [];
+
+    for (let i = 1; i <= TOTAL_FRAMES; i++) {
+      const img = new Image();
+      const padded = String(i).padStart(3, '0');
+      img.src = `/frames/ezgif-frame-${padded}.jpg`;
+      if ('decode' in img) {
+        img.decode().catch(() => {});
       }
-      rafRef.current = requestAnimationFrame(animate);
+      images.push(img);
+    }
+    imagesRef.current = images;
+
+    return () => {
+      mounted = false;
     };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  const padded = String(frame).padStart(3, '0');
+  // Ultra-smooth render loop with High-DPI resolution and LERP damping
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    let animationFrameId;
+    let autoRotateProgress = 0;
+
+    const resizeCanvas = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+    };
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    const draw = (timestamp) => {
+      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
+      const deltaTime = Math.min(timestamp - lastTimeRef.current, 50);
+      lastTimeRef.current = timestamp;
+
+      const displayWidth = canvas.width;
+      const displayHeight = canvas.height;
+
+      // Scroll progress mapping
+      const scrollY = window.scrollY;
+      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      const scrollProgress = Math.min(1, Math.max(0, scrollY / maxScroll));
+
+      // Delta-time based smooth idle rotation
+      autoRotateProgress += deltaTime * 0.014;
+
+      // Calculate target float frame
+      const targetFrame = (scrollProgress * TOTAL_FRAMES * 2 + autoRotateProgress) % TOTAL_FRAMES;
+
+      // Smooth LERP (linear interpolation) for liquid-smooth 60 FPS motion
+      let diff = targetFrame - currentFrameRef.current;
+      if (diff > TOTAL_FRAMES / 2) diff -= TOTAL_FRAMES;
+      if (diff < -TOTAL_FRAMES / 2) diff += TOTAL_FRAMES;
+
+      currentFrameRef.current += diff * 0.12; // Damping easing factor
+      if (currentFrameRef.current < 0) currentFrameRef.current += TOTAL_FRAMES;
+      if (currentFrameRef.current >= TOTAL_FRAMES) currentFrameRef.current -= TOTAL_FRAMES;
+
+      const frameIdx = Math.floor(currentFrameRef.current) % TOTAL_FRAMES;
+      const img = imagesRef.current[frameIdx];
+
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        // High-DPI aspect-ratio cover scaling
+        const scale = Math.max(displayWidth / img.naturalWidth, displayHeight / img.naturalHeight);
+        const x = (displayWidth - img.naturalWidth * scale) / 2;
+        const y = (displayHeight - img.naturalHeight * scale) / 2;
+
+        ctx.fillStyle = '#0A0800';
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
+
+        ctx.drawImage(
+          img,
+          0,
+          0,
+          img.naturalWidth,
+          img.naturalHeight,
+          x,
+          y,
+          img.naturalWidth * scale,
+          img.naturalHeight * scale
+        );
+      }
+
+      animationFrameId = requestAnimationFrame(draw);
+    };
+
+    animationFrameId = requestAnimationFrame(draw);
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []);
+
   return (
-    <div className="trophy-player" ref={containerRef}>
-      <div className="trophy-player-glow" />
-      <img
-        key={padded}
-        src={`/frames/ezgif-frame-${padded}.jpg`}
-        alt="Rotating Trophy"
-        className={`trophy-frame-img ${loaded ? 'visible' : ''}`}
-        onLoad={() => setLoaded(true)}
-        draggable={false}
-      />
+    <div className="hero-fullscreen-bg">
+      <canvas ref={canvasRef} className="trophy-fullscreen-canvas" />
+      <div className="hero-overlay-dark" />
+      <div className="hero-overlay-radial" />
+      <div className="hero-overlay-gold-glow" />
     </div>
   );
 };
@@ -152,8 +234,8 @@ const Home = () => {
     <div className="home-page">
       {/* ── HERO ── */}
       <section className="hero-section" ref={heroRef}>
-        <div className="hero-bg-glow hero-glow-1" />
-        <div className="hero-bg-glow hero-glow-2" />
+        {/* Fullscreen background trophy sequence */}
+        <TrophyFullscreenBackground />
 
         <motion.div className="hero-content" style={{ opacity: heroOpacity, y: heroY }}>
           <div className="hero-left">
@@ -218,16 +300,6 @@ const Home = () => {
                   <span>{f.text}</span>
                 </div>
               ))}
-            </motion.div>
-          </div>
-
-          <div className="hero-right">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.6, duration: 1, ease: 'easeOut' }}
-            >
-              <TrophyFramePlayer />
             </motion.div>
           </div>
         </motion.div>
